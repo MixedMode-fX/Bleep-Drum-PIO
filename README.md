@@ -1,3 +1,29 @@
+# Bleep Drum for PlatformIO
+
+This the code used in https://www.youtube.com/watch?v=HCvKrhoXOpg
+Based on the original code from Bleep Labs : https://github.com/BleepLabs/Bleep-Drum
+
+## Build instruction
+
+### Bleep Drum Samples
+
+`pio run -e bleep`
+
+### Dam Drum samples
+
+`pio run -e dam`
+
+### Dam Drum v2 samples
+
+`pio run -e dam2`
+
+### Dam Drum v3 samples
+
+`pio run -e dam3`
+
+
+# Bleep Drum Release notes
+
 April 2020:<br>
 V15 <br>
 Click track – Hold shift for 4 seconds to turn on and off click while the device is playing.<br>
