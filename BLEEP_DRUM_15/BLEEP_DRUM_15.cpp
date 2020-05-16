@@ -14,6 +14,9 @@
 
 // SAMPLES DATA
 #include "sine.h"
+
+#ifndef CUSTOM_SAMPLES
+
 #ifdef DAM
 #include "samples_dam.h"
 #elif DAM2
@@ -22,6 +25,10 @@
 #include "samples_dam3.h"
 #else
 #include "samples_bleep.h"
+#endif
+
+#else
+#include "samples/samples.h"
 #endif
 
 // DEPENDENCIES
