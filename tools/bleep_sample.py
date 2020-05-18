@@ -5,26 +5,31 @@ import yaml
 from librosa.core import load
 from collections import namedtuple
 from pathlib import Path
+import click
 
-
-
-config_file = "./tools/samples/samples.yml"
-input_path = Path(config_file).parent
-output_path = "./BLEEP_DRUM_15/samples"
-
+w = 75
 SampleConfig = namedtuple('SampleConfig', ('sets', 'sample_rate', 'firmware_size', 'flash_size'))
 
 class BleepSample:
-    def __init__(self, name, config, input_path = input_path, output_path = output_path):
+    def __init__(self, name, config, input_path, output_path):
         self.name = name
         self.config = config
 
         self.input_path = Path(input_path)
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)            # create output_path directory if it doesn't exist
+        self.root = self.output_path.parent.parent
 
-        self.make_header()
+        click.echo("-" * w)
+        click.echo(f"{self.name:^{w}}")
+        click.echo("-" * w)
+
+        try:
+            self.make_header()
+        except Exception as e:
+            click.secho(str(e), fg="red")
         self.edit_platformio()
+        click.echo("")
 
     @property
     def available(self):
@@ -34,11 +39,12 @@ class BleepSample:
         return self.config.flash_size - self.config.firmware_size
 
 
-    def resample(self, source):
+    @classmethod
+    def resample(self, source, input_path):
         """
         Opens a WAV file, resamples it, trim zeros and ending,  to unsigned integer
         """
-        sample, sr = load(self.input_path / Path(source.file), sr=source.sr, mono=True)                 # load the wav file & resample it to 10kHz
+        sample, sr = load(input_path / Path(source.file), sr=source.sr, mono=True)     # load the wav file & resample it
         sample = sample / np.max(np.abs(sample))                    # normalize
         sample = (127 * sample).astype(int)                         # convert to int
         sample = np.trim_zeros(sample)                              # trim any leading and trailing zeros
@@ -54,25 +60,34 @@ class BleepSample:
         """
         samples_size = 0
 
+        output_file = Path(self.output_path) / Path(f"samples_{self.name}").with_suffix(".h")
+        click.echo(f" -> {output_file.relative_to(self.root).as_posix()}")
+
         code = list()
         header = ["#include <Arduino.h>", "/*"]
         for i, source in enumerate(self.config.sets[self.name]):
-            sample_8bit = self.resample(source)
+            sample_8bit = self.resample(source, self.input_path)
 
             code.append(
-(               f"const byte table{i}[] PROGMEM = {{" 
+                (
+                f"const byte table{i}[] PROGMEM = {{" 
                 f"{','.join([str(s) for s in sample_8bit])} }};\n"
                 f"uint16_t length{i} = {len(sample_8bit)};\n"
                 )
             )
 
-            header.append(f" * {f'table{i}':<10}{source.file:<20}{len(sample_8bit):>6}")
+            headline = f" * {f'table{i}':<10}{source.file:<20}{len(sample_8bit):>6}"
+            header.append(headline)
+            click.echo(headline)
+
             samples_size += len(sample_8bit)
         header.append(f" * {'------':>36}")
-        header.append(f" * Total{samples_size:>31}")
+        total = f" * Total{samples_size:>31}"
+        header.append(total)
         header.append(" */")
 
-        output_file = Path(output_path) / Path(f"samples_{self.name}").with_suffix(".h")
+        click.echo(total)
+
         with open(output_file, 'w') as _file:
             _file.write("\n".join(header + code))
 
@@ -84,14 +99,15 @@ class BleepSample:
         Adds the new sample to platformio.ini
         """
 
+        pio_ini = self.root / 'platformio.ini'
         pio = configparser.ConfigParser()
-        pio.read('platformio.ini')
+        pio.read(pio_ini)
 
         pio[f'env:{self.name.lower()}'] = {
             'build_flags': f"\n${{env.build_flags}}\n-D {self.name.upper()}\n-D CUSTOM_SAMPLES"
         }
         
-        with open('platformio.ini', 'w') as _file:
+        with open(pio_ini, 'w') as _file:
             pio.write(_file)
 
 
@@ -126,7 +142,7 @@ def read_config(config_file):
 
 
 
-def make_samples_h(env_names):
+def make_samples_h(env_names, output_path):
     """
     generates samples.h to include all custom environments
     """
@@ -144,11 +160,32 @@ def make_samples_h(env_names):
         _file.write("\n".join(output))
 
 
-if __name__ == "__main__":
+@click.command()
+@click.argument('config', type=click.Path())
+@click.option('-i', '--input', type=click.Path())
+@click.option('-o', '--output', type=click.Path(), default=(Path(__file__).absolute().parent.parent / Path ('BLEEP_DRUM_15/samples')))
+def cli(config, input, output):
 
-    config = read_config(config_file)
+    config = Path(config)
+    if input is None:
+        input = config.parent
+    output = Path(output)
+
+    click.echo("*" * w)
+    click.echo("\nBleep Drum Sample Converter\n")
+    click.echo("*" * w)
+    click.echo(f"Config: {config.as_posix()}")
+    click.echo(f"Input:  {input.absolute().as_posix()}")
+    click.echo(f"Output: {output.absolute().as_posix()}\n")
+    click.echo("*" * w)
+
+    config = read_config(config)
 
     for name in config.sets.keys():
-        BleepSample(name, config, input_path, output_path)
+        BleepSample(name, config, input, output)
     
-    make_samples_h(config.sets.keys())
+    make_samples_h(config.sets.keys(), output)
+
+
+if __name__ == "__main__":
+    sys.exit(cli())

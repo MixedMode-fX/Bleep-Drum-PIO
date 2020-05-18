@@ -1,0 +1,19 @@
+# Example configuration file for generating custom sample header files
+
+sr: 19626 # = 2 * 9813
+firmware_size: 11586
+flash_size: 32256
+samples:
+
+  tr808: 
+    - 808-hat.wav
+    - 808-tom.wav
+    - 808-snare.wav
+    - 808-kick.wav
+
+  tr909:
+    - 909-clap.wav
+    - file: 909-tom.wav
+      trim: 134
+    - 909-snare.wav
+    - 909-kick.wav
