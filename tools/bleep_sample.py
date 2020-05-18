@@ -1,97 +1,137 @@
 import numpy as np
 import sys
 import configparser
+import yaml
 from librosa.core import load
 from collections import namedtuple
 from pathlib import Path
 
-firmware_size = 11586
-flash_size = 32256
-available = flash_size - firmware_size
 
-input_path = "./tools/samples/"
+
+config_file = "./tools/samples/samples.yml"
+input_path = Path(config_file).parent
 output_path = "./BLEEP_DRUM_15/samples"
 
-sr = 9813 * 2 
+SampleConfig = namedtuple('SampleConfig', ('sets', 'sample_rate', 'firmware_size', 'flash_size'))
 
-Sample = namedtuple('Sample', ['file', 'trim', 'sr'])
+class BleepSample:
+    def __init__(self, name, config, input_path = input_path, output_path = output_path):
+        self.name = name
+        self.config = config
 
-def resample(source, trim=0, sr=22050, varname="table", lengthname="length"):
-    """
-    Opens a WAV file, resamples it to unsigned integer and returns the C header code to use in Bleep Drum
-    """
-    sample, sr = load(source, sr=sr, mono=True)                 # load the wav file & resample it to 10kHz
-    sample = sample / np.max(np.abs(sample))                    # normalize
-    sample = (127 * sample).astype(int)                         # convert to int
-    sample = np.trim_zeros(sample)                              # trim any leading and trailing zeros
-    if trim > 0:                                                # remove the last 'trim' samples to make some space...
-        sample = sample[:-trim]
-    sample = sample + 127                                       # apply offset to use unsigned int
+        self.input_path = Path(input_path)
+        self.output_path = Path(output_path)
+        self.output_path.mkdir(parents=True, exist_ok=True)            # create output_path directory if it doesn't exist
 
-    output = (
-        f"const byte {varname}[] PROGMEM = {{" 
-        f"{','.join([str(s) for s in sample])} }};\n"
-        f"uint16_t {lengthname} = {len(sample)};\n"
-        )
-    return output, len(sample)
+        self.make_header()
+        self.edit_platformio()
+
+    @property
+    def available(self):
+        """
+        Flash memory available for samples
+        """
+        return self.config.flash_size - self.config.firmware_size
 
 
-def make_header(input_path, samples, name):
-    """
-    Makes a header file from a set of WAV files
-    """
-    samples_size = 0
-
-    code = list()
-    header = ["#include <Arduino.h>", "/*"]
-    for i, sample in enumerate(samples):
-        sample_output, size = resample(Path(input_path) / Path(sample.file), sample.trim, sample.sr, f"table{i}", f"length{i}")
-        code.append(sample_output)
-        header.append(f" * {f'table{i}':<10}{sample.file:<20}{size:>6}")
-        samples_size += size
-    header.append(f" * {'------':>36}")
-    header.append(f" * Total{samples_size:>31}")
-    header.append(" */")
-
-    output_file = Path(output_path) / Path(f"samples_{name}").with_suffix(".h")
-    with open(output_file, 'w') as _file:
-        _file.write("\n".join(header + code))
-
-    if samples_size > available:
-        raise Exception(f"Not enough memory for {name} - set trims or change sample rate to reduce by {samples_size - available} bytes")
-
-def make_headers(samples):
-    for name, sample_set in samples.items():
-        try:
-            make_header(input_path, sample_set, name)
-        except Exception as e:
-            print(str(e))
-    
+    def resample(self, source):
+        """
+        Opens a WAV file, resamples it, trim zeros and ending,  to unsigned integer
+        """
+        sample, sr = load(self.input_path / Path(source.file), sr=source.sr, mono=True)                 # load the wav file & resample it to 10kHz
+        sample = sample / np.max(np.abs(sample))                    # normalize
+        sample = (127 * sample).astype(int)                         # convert to int
+        sample = np.trim_zeros(sample)                              # trim any leading and trailing zeros
+        if source.trim > 0:                                         # remove the last 'trim' samples to make some space...
+            sample = sample[:-source.trim]                          # TODO: apply window or fade out to avoid any click
+        sample = sample + 127                                       # apply offset to use unsigned int
+        return sample
 
 
-def edit_platformio(samples):
-    """
-    Adds the new sample to platformio.ini
-    """
+    def make_header(self):
+        """
+        Makes a header file from a set of WAV files
+        """
+        samples_size = 0
 
-    config = configparser.ConfigParser()
-    config.read('platformio.ini')
+        code = list()
+        header = ["#include <Arduino.h>", "/*"]
+        for i, source in enumerate(self.config.sets[self.name]):
+            sample_8bit = self.resample(source)
 
-    for env in samples.keys():
-        config[f'env:{env.lower()}'] = {
-            'build_flags': f"\n${{env.build_flags}}\n-D {env.upper()}\n-D CUSTOM_SAMPLES"
+            code.append(
+(               f"const byte table{i}[] PROGMEM = {{" 
+                f"{','.join([str(s) for s in sample_8bit])} }};\n"
+                f"uint16_t length{i} = {len(sample_8bit)};\n"
+                )
+            )
+
+            header.append(f" * {f'table{i}':<10}{source.file:<20}{len(sample_8bit):>6}")
+            samples_size += len(sample_8bit)
+        header.append(f" * {'------':>36}")
+        header.append(f" * Total{samples_size:>31}")
+        header.append(" */")
+
+        output_file = Path(output_path) / Path(f"samples_{self.name}").with_suffix(".h")
+        with open(output_file, 'w') as _file:
+            _file.write("\n".join(header + code))
+
+        if samples_size > self.available:
+            raise Exception(f"Not enough memory for {self.name} - set trims or change sample rate to reduce by {samples_size - self.available} bytes")
+
+    def edit_platformio(self):
+        """
+        Adds the new sample to platformio.ini
+        """
+
+        pio = configparser.ConfigParser()
+        pio.read('platformio.ini')
+
+        pio[f'env:{self.name.lower()}'] = {
+            'build_flags': f"\n${{env.build_flags}}\n-D {self.name.upper()}\n-D CUSTOM_SAMPLES"
         }
+        
+        with open('platformio.ini', 'w') as _file:
+            pio.write(_file)
+
+
+def read_config(config_file):
+    """
+    Read configuration YAML and return the results
+    """
+    config = yaml.load(open(config_file, 'r'), Loader=yaml.FullLoader)
+
+    try:
+        firmware_size = config["firmware_size"]
+    except KeyError:
+        firmware_size = 0
+
+    try:
+        flash_size = config["flash_size"]
+    except KeyError:
+        flash_size = 32256
+
+    try:
+        sr = config["sr"]
+    except KeyError:
+        sr = 9813 * 2 # this number is taken from Bleep Drum's measured audio clock
+
+    SampleSet = namedtuple('SampleSet', ('file', 'trim', 'sr'), defaults=(None, 0, sr))
+
+    samples = dict()
+    for key, sample_set in config["samples"].items():
+        samples[key] = [SampleSet(sample) if isinstance(sample, str) else SampleSet(**sample) for sample in sample_set]
     
-    with open('platformio.ini', 'w') as configfile:
-        config.write(configfile)
+    return SampleConfig(samples, sr, firmware_size, flash_size)
 
 
-def make_samples_h(samples):
+
+def make_samples_h(env_names):
     """
     generates samples.h to include all custom environments
     """
     output = list()
-    for i, env in enumerate(samples.keys()):
+    for i, env in enumerate(env_names):
         if i == 0:
             output.append(f"#ifdef {env.upper()}")
         else:
@@ -103,36 +143,12 @@ def make_samples_h(samples):
     with open(output_file, 'w') as _file:
         _file.write("\n".join(output))
 
+
 if __name__ == "__main__":
 
-    samples = {
-        "tr808": [
-            Sample("808-hat.wav", 0, sr),
-            Sample("808-tom.wav", 0, sr),
-            Sample("808-snare.wav", 0, sr),
-            Sample("808-kick.wav", 0, sr),
-        ],
-        "tr909": [
-            Sample("909-clap.wav", 0, sr),
-            Sample("909-tom.wav", 134, sr),
-            Sample("909-snare.wav", 0, sr),
-            Sample("909-kick.wav", 0, sr),
-        ],
-        "traks": [
-            Sample("traks-cowbell.wav", 0, sr),
-            Sample("traks-tom.wav", 0, sr),
-            Sample("traks-snare.wav", 0, sr),
-            Sample("traks-kick.wav", 0, sr),
-        ],
-        "dx": [
-            Sample("dx-shaker.wav", 0, sr),
-            Sample("dx-tom.wav", 6300, sr),
-            Sample("dx-snare.wav", 0, sr),
-            Sample("dx-kick.wav", 0, sr),
-        ],
-    }
+    config = read_config(config_file)
 
-
-    make_headers(samples)
-    edit_platformio(samples)
-    make_samples_h(samples)
+    for name in config.sets.keys():
+        BleepSample(name, config, input_path, output_path)
+    
+    make_samples_h(config.sets.keys())
