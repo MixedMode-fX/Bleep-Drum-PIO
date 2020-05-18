@@ -7,18 +7,20 @@ from collections import namedtuple
 from pathlib import Path
 import click
 
-w = 75
+w = 85
 SampleConfig = namedtuple('SampleConfig', ('sets', 'sample_rate', 'firmware_size', 'flash_size'))
 
 class BleepSample:
-    def __init__(self, name, config, input_path, output_path):
+    def __init__(self, name, config, output_path):
         self.name = name
         self.config = config
 
-        self.input_path = Path(input_path)
+        self.input_path = Path(config.sets[self.name]['input_path'])
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)            # create output_path directory if it doesn't exist
         self.root = self.output_path.parent.parent
+
+        self.samples = config.sets[self.name]['samples']
 
         click.echo("-" * w)
         click.echo(f"{self.name:^{w}}")
@@ -45,7 +47,8 @@ class BleepSample:
         Opens a WAV file, resamples it, trim zeros and ending,  to unsigned integer
         """
         sample, sr = load(input_path / Path(source.file), sr=source.sr, mono=True)     # load the wav file & resample it
-        sample = sample / np.max(np.abs(sample))                    # normalize
+        if source.normalize:
+            sample = sample / np.max(np.abs(sample))                # normalize
         sample = (127 * sample).astype(int)                         # convert to int
         sample = np.trim_zeros(sample)                              # trim any leading and trailing zeros
         if source.trim > 0:                                         # remove the last 'trim' samples to make some space...
@@ -65,7 +68,7 @@ class BleepSample:
 
         code = list()
         header = ["#include <Arduino.h>", "/*"]
-        for i, source in enumerate(self.config.sets[self.name]):
+        for i, source in enumerate(self.samples):
             sample_8bit = self.resample(source, self.input_path)
 
             code.append(
@@ -76,17 +79,14 @@ class BleepSample:
                 )
             )
 
-            headline = f" * {f'table{i}':<10}{source.file:<20}{len(sample_8bit):>6}"
+            headline = f" * {f'table{i}':<10}{source.file:<66}{len(sample_8bit):>6}"
             header.append(headline)
-            click.echo(headline)
-
             samples_size += len(sample_8bit)
-        header.append(f" * {'------':>36}")
-        total = f" * Total{samples_size:>31}"
-        header.append(total)
+        header.append(f" * {'------':>82}")
+        header.append(f" * Total{samples_size:>77}")
         header.append(" */")
 
-        click.echo(total)
+        click.echo("\n".join(header[2:-1]))
 
         with open(output_file, 'w') as _file:
             _file.write("\n".join(header + code))
@@ -111,7 +111,7 @@ class BleepSample:
             pio.write(_file)
 
 
-def read_config(config_file):
+def read_config(config_file, default_input_path):
     """
     Read configuration YAML and return the results
     """
@@ -132,12 +132,31 @@ def read_config(config_file):
     except KeyError:
         sr = 9813 * 2 # this number is taken from Bleep Drum's measured audio clock
 
-    SampleSet = namedtuple('SampleSet', ('file', 'trim', 'sr'), defaults=(None, 0, sr))
+    SampleSet = namedtuple('SampleSet', ('file', 'trim', 'sr', 'normalize'), defaults=(None, 0, sr, True))
 
     samples = dict()
     for key, sample_set in config["samples"].items():
-        samples[key] = [SampleSet(sample) if isinstance(sample, str) else SampleSet(**sample) for sample in sample_set]
-    
+        try:
+            input_path = sample_set["input_path"]
+        except (KeyError, TypeError):
+            input_path = default_input_path
+
+        try:
+            sample_list = sample_set["samples"]
+        except KeyError:
+            raise Exception("couldn't find 'samples'")
+        except TypeError:
+            sample_list = sample_set
+
+        try:
+            samples[key] = {
+                'input_path': input_path,
+                'samples': [SampleSet(sample) if isinstance(sample, str) else SampleSet(**sample) for sample in sample_list]
+            }
+        except Exception as e:
+            click.echo(f"Error in {key}: ")
+            click.secho(str(e), fg='red')
+
     return SampleConfig(samples, sr, firmware_size, flash_size)
 
 
@@ -179,10 +198,10 @@ def cli(config, input, output):
     click.echo(f"Output: {output.absolute().as_posix()}\n")
     click.echo("*" * w)
 
-    config = read_config(config)
+    config = read_config(config, input)
 
     for name in config.sets.keys():
-        BleepSample(name, config, input, output)
+        BleepSample(name, config, output)
     
     make_samples_h(config.sets.keys(), output)
 
