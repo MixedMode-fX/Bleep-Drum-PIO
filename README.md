@@ -41,6 +41,16 @@ I would suggest you create a virtual environment:
 
 ```bash
 virtualenv venv --python=python3
+```
+
+To enter the virtual environment, just activate it:
+```bash
+. venv/bin/activate
+```
+
+Then install the bleep tool:
+
+```
 pip3 install .
 ```
 
