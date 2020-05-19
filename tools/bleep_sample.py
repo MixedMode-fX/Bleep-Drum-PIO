@@ -9,6 +9,7 @@ import click
 
 w = 85
 SampleConfig = namedtuple('SampleConfig', ('sets', 'sample_rate', 'firmware_size', 'flash_size'))
+root = Path(__file__).absolute().parent.parent
 
 class BleepSample:
     def __init__(self, name, config, output_path):
@@ -116,7 +117,11 @@ def read_config(config_file, default_input_path):
     """
     Read configuration YAML and return the results
     """
-    config = yaml.load(open(config_file, 'r'), Loader=yaml.FullLoader)
+    try:
+        config = yaml.load(open(config_file, 'r'), Loader=yaml.FullLoader)
+    except Exception as e:
+        click.secho(str(e), fg='red')
+        quit()
 
     try:
         firmware_size = config["firmware_size"]
@@ -180,11 +185,19 @@ def make_samples_h(env_names, output_path):
         _file.write("\n".join(output))
 
 
-@click.command()
+
+@click.group()
+def cli():
+    pass
+
+@cli.command()
 @click.argument('config', type=click.Path())
 @click.option('-i', '--input', type=click.Path())
-@click.option('-o', '--output', type=click.Path(), default=(Path(__file__).absolute().parent.parent / Path ('BLEEP_DRUM_15/samples')))
-def cli(config, input, output):
+@click.option('-o', '--output', type=click.Path(), default=(root / Path ('BLEEP_DRUM_15/samples')))
+def make(config, input, output):
+    """
+    Make sample C header files from configuration YAML file
+    """
 
     config = Path(config)
     if input is None:
@@ -206,6 +219,38 @@ def cli(config, input, output):
     
     make_samples_h(config.sets.keys(), output)
 
+
+@cli.command()
+@click.argument('env')
+def burn(env):
+    """
+    Programs the Bleep Drum with the specified environment
+    """
+    import subprocess
+    process = subprocess.Popen(f"pio run -t upload -e {env} -d {root}".split(" "), stdout=subprocess.PIPE)
+    while True:
+        output = process.stdout.readline().decode()
+        if output == '' and process.poll() is not None:
+            break
+        if output:
+            print(output.strip())
+    process.poll()
+
+
+@cli.command()
+def list():
+    """
+    List environments
+    """
+    pio_ini = root / 'platformio.ini'
+    pio = configparser.ConfigParser()
+    pio.read(pio_ini)
+
+    click.echo("Bleep Drum Samples: ")
+
+    for env in pio.keys():
+        if env [:4] == "env:":
+            print(f" * {env[4:]}")
 
 if __name__ == "__main__":
     sys.exit(cli())
