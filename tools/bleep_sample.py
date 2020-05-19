@@ -237,8 +237,8 @@ def burn(env):
     process.poll()
 
 
-@cli.command()
-def list():
+@cli.command(name='list')
+def list_env():
     """
     List environments
     """
