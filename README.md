@@ -1,6 +1,6 @@
 # Bleep Drum for PlatformIO
 
-This the code used in https://www.youtube.com/watch?v=HCvKrhoXOpg
+This is the code used in [arduino in platformio : programming the bleep drum](https://www.youtube.com/watch?v=HCvKrhoXOpg)
 
 Based on the original code from Bleep Labs : https://github.com/BleepLabs/Bleep-Drum
 
@@ -21,6 +21,51 @@ Based on the original code from Bleep Labs : https://github.com/BleepLabs/Bleep-
 ### Dam Drum v3 samples
 
 `pio run -e dam3`
+
+
+## Program custom samples
+
+0. Install the bleep tool with Python 3
+
+```pip3 install .```
+
+If you plan on modifying the script, make this installation editable
+
+```pip3 install -e .```
+
+
+1. Create YAML file to specify the source of the samples, let's call it `samples.yml`
+
+
+```yaml
+firmware_size: 11658        # put firmware size without the samples here - this is used to warn you if you samples won't fit on flash
+# sample_rate: 17000        # sample rate for resampling the WAV files - leave it commented to use the default
+
+samples:
+  tr808:                    # this is the name of the environment
+    input_path: path/to/my/808
+    samples:
+      - file: 808-hat.wav   # 
+        normalize: no       # don't normalize
+        sr: 15000           # resample at 15kHz
+        trim: 100           # trim the end by 100 samples
+      - 808-tom.wav         # only the file name is required, just enter it as a string if you don't need to tweak other options
+      - 808-snare.wav
+      - 808-kick.wav
+
+  tr909:                    # without specifying an input path, it will use the location of this file as a root directory
+    - 909-clap.wav
+    - file: 909-tom.wav
+      trim: 134
+    - 909-snare.wav
+    - 909-kick.wav
+```
+
+2. Run the script : `bleep samples.yml`
+
+This will generate all header files from the specified WAV files and update platformio.ini with the new custom environments.
+
+3. Program your samples by specifying the environment name `pio run -t upload -e tr808`
 
 
 # Bleep Drum Release notes

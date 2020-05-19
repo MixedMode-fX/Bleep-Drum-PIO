@@ -44,15 +44,16 @@ class BleepSample:
     @classmethod
     def resample(self, source, input_path):
         """
-        Opens a WAV file, resamples it, trim zeros and ending,  to unsigned integer
+        Opens a WAV file, resamples it, trim zeros and ending, to unsigned integer
+        Inspired by: http://bleeplabs.com/bleep-drum-user-guide/
         """
         sample, sr = load(input_path / Path(source.file), sr=source.sr, mono=True)     # load the wav file & resample it
         if source.normalize:
             sample = sample / np.max(np.abs(sample))                # normalize
         sample = (127 * sample).astype(int)                         # convert to int
         sample = np.trim_zeros(sample)                              # trim any leading and trailing zeros
-        if source.trim > 0:                                         # remove the last 'trim' samples to make some space...
-            sample = sample[:-source.trim]                          # TODO: apply window or fade out to avoid any click
+        if source.trim > 0:                                         # 
+            sample = sample[:-source.trim]                          # remove the last 'trim' samples to make some space...
         sample = sample + 127                                       # apply offset to use unsigned int
         return sample
 
