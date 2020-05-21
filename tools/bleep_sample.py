@@ -10,6 +10,8 @@ import click
 w = 85
 SampleConfig = namedtuple('SampleConfig', ('sets', 'sample_rate', 'firmware_size', 'flash_size'))
 root = Path(__file__).absolute().parent.parent
+pio_ini = root / 'platformio.ini'
+bleep_envs = ['bleep', 'dam', 'dam2', 'dam3']
 
 class BleepSample:
     def __init__(self, name, config, output_path):
@@ -65,8 +67,8 @@ class BleepSample:
         """
         samples_size = 0
 
-        output_file = Path(self.output_path) / Path(f"samples_{self.name}").with_suffix(".h")
-        click.echo(f" -> {output_file.relative_to(self.root).as_posix()}")
+        output_file = Path(self.output_path) / Path(self.name).with_suffix(".h")
+        click.echo(f" -> {output_file.relative_to(self.root)}")
 
         code = list()
         header = ["#include <Arduino.h>", "/*"]
@@ -101,16 +103,14 @@ class BleepSample:
         Adds the new sample to platformio.ini
         """
 
-        pio_ini = self.root / 'platformio.ini'
-        pio = configparser.ConfigParser()
-        pio.read(pio_ini)
+        config = pio()
 
-        pio[f'env:{self.name.lower()}'] = {
+        config[f'env:{self.name.lower()}'] = {
             'build_flags': f"\n${{env.build_flags}}\n-D {self.name.upper()}\n-D CUSTOM_SAMPLES"
         }
         
         with open(pio_ini, 'w') as _file:
-            pio.write(_file)
+            config.write(_file)
 
 
 def read_config(config_file, default_input_path):
@@ -167,22 +167,39 @@ def read_config(config_file, default_input_path):
 
 
 
-def make_samples_h(env_names, output_path):
+def make_samples_h(output_path):
     """
     generates samples.h to include all custom environments
     """
     output = list()
-    for i, env in enumerate(env_names):
+    custom_envs = [env for env in get_env_names() if env not in bleep_envs] # filter out stock environments
+    for i, env in enumerate(custom_envs): 
         if i == 0:
             output.append(f"#ifdef {env.upper()}")
         else:
             output.append(f"#elif {env.upper()}")
-        output.append(f'#include "samples_{env.lower()}.h"')
+        output.append(f'#include "{env.lower()}.h"')
     output.append("#endif")
 
     output_file = Path(output_path) / Path(f"samples").with_suffix(".h")
     with open(output_file, 'w') as _file:
         _file.write("\n".join(output))
+
+
+def pio():
+    """
+    parse platformio.ini
+    """
+    parser = configparser.ConfigParser()
+    parser.read(pio_ini)
+    return parser
+
+
+def get_env_names():
+    """
+    list of all environments available in platformio.ini
+    """
+    return [env[4:] for env in pio().keys() if env [:4] == "env:"] 
 
 
 
@@ -207,9 +224,9 @@ def make(config, input, output):
     click.echo("*" * w)
     click.echo("\nBleep Drum Sample Converter\n")
     click.echo("*" * w)
-    click.echo(f"Config: {config.as_posix()}")
-    click.echo(f"Input:  {input.absolute().as_posix()}")
-    click.echo(f"Output: {output.absolute().as_posix()}\n")
+    click.echo(f"Config: {config}")
+    click.echo(f"Input:  {input.absolute()}")
+    click.echo(f"Output: {output.absolute()}\n")
     click.echo("*" * w)
 
     config = read_config(config, input)
@@ -217,23 +234,29 @@ def make(config, input, output):
     for name in config.sets.keys():
         BleepSample(name, config, output)
     
-    make_samples_h(config.sets.keys(), output)
+    make_samples_h(output)
 
 
 @cli.command()
-@click.argument('env')
+@click.argument('env', required=False)
 def burn(env):
     """
-    Programs the Bleep Drum with the specified environment
+    Programs the Bleep Drum
     """
     import subprocess
-    process = subprocess.Popen(f"pio run -t upload -e {env} -d {root}".split(" "), stdout=subprocess.PIPE)
+
+    cmd = f"pio run -t upload -d {root}".split(" ")
+    if env is not None and env in get_env_names(): # when a valid environment is specified, we burn that
+        cmd.append("-e")
+        cmd.append(env)
+
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     while True:
         output = process.stdout.readline().decode()
         if output == '' and process.poll() is not None:
             break
         if output:
-            print(output.strip())
+            click.echo(output.strip())
     process.poll()
 
 
@@ -242,15 +265,33 @@ def list_env():
     """
     List environments
     """
-    pio_ini = root / 'platformio.ini'
-    pio = configparser.ConfigParser()
-    pio.read(pio_ini)
-
     click.echo("Bleep Drum Samples: ")
+    for env in get_env_names():
+        print(f" * {env}")
 
-    for env in pio.keys():
-        if env [:4] == "env:":
-            print(f" * {env[4:]}")
+
+@cli.command()
+@click.argument('env', required=False)
+def default(env):
+    config = pio()
+
+    if env is None:
+        try:
+            click.echo(f"Default environment is: {config['platformio']['default_envs']}")
+        except NameError:
+            click.echo("No default environment set...")
+        return
+
+    if env in get_env_names():
+        config['platformio']['default_envs'] = env
+        with open(pio_ini, 'w') as _file:
+            config.write(_file)
+    else:
+        click.secho(f"ERROR: {env} is not present in platformio.ini", fg="red")
+        click.echo("\nYou must use one of the following environments:\n")
+        for env in get_env_names():
+            print(f" * {env}")
+
 
 if __name__ == "__main__":
     sys.exit(cli())

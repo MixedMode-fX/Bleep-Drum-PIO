@@ -1,17 +1,19 @@
-# Example configuration file for generating custom sample header files
+firmware_size: 11658        # put firmware size without the samples here - this is used to warn you if you samples won't fit on flash
+# sample_rate: 17000        # sample rate for resampling the WAV files - leave it commented to use the default
 
-sr: 19626 # = 2 * 9813
-firmware_size: 11586
-flash_size: 32256
 samples:
+  tr808:                    # this is the name of the environment
+    input_path: path/to/my/808
+    samples:
+      - file: 808-hat.wav   # 
+        normalize: no       # don't normalize
+        sr: 15000           # resample at 15kHz
+        trim: 100           # trim the end by 100 samples
+      - 808-tom.wav         # only the file name is required, just enter it as a string if you don't need to tweak other options
+      - 808-snare.wav
+      - 808-kick.wav
 
-  tr808: 
-    - 808-hat.wav
-    - 808-tom.wav
-    - 808-snare.wav
-    - 808-kick.wav
-
-  tr909:
+  tr909:                    # without specifying an input path, it will use the location of this file as a root directory
     - 909-clap.wav
     - file: 909-tom.wav
       trim: 134
