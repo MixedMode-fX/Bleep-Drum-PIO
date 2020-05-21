@@ -29,6 +29,9 @@ class BleepSample:
         click.echo(f"{self.name:^{w}}")
         click.echo("-" * w)
 
+        if len(self.samples) != 4:
+            click.secho(f"Invalid specification for {self.name} - you must specify 4 samples")
+
         try:
             self.make_header()
         except Exception as e:
@@ -273,6 +276,9 @@ def list_env():
 @cli.command()
 @click.argument('env', required=False)
 def default(env):
+    """
+    Read or set default environment
+    """
     config = pio()
 
     if env is None:
